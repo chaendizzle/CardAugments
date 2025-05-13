@@ -40,7 +40,7 @@
             <version>5.27.0</version>
             <scope>system</scope>
             <!--<systemPath>${Steam.path}/workshop/content/646570/1605833019/BaseMod.jar</systemPath>-->
-            <systemPath>${Steam.path}/common/SlayTheSpire/mods/BaseMod.jar</systemPath>
+            <systemPath>${Steam.path}/workshop/content/646570/1605833019/BaseMod.jar</systemPath>
         </dependency>
         <dependency>
             <groupId>sltslib</groupId>
@@ -99,11 +99,11 @@
             <systemPath>${Steam.path}/workshop/content/646570/2969378732/TheRainbow.jar</systemPath>
         </dependency>
         <dependency>
-            <groupId>autumn</groupId>
-            <artifactId>Starlight</artifactId>
-            <version>0.8.9</version>
+            <groupId>spireTogether</groupId>
+            <artifactId>TogetherInSpire</artifactId>
+            <version>6.4.20</version>
             <scope>system</scope>
-            <systemPath>${Steam.path}/common/SlayTheSpire/mods/Starlight.jar</systemPath>
+            <systemPath>${Steam.path}/workshop/content/646570/2384072973/TogetherInSpire.jar</systemPath>
         </dependency>
         <dependency>
             <groupId>kio</groupId>
