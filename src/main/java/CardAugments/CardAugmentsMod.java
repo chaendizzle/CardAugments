@@ -4,6 +4,7 @@ import CardAugments.cardmods.AbstractAugment;
 import CardAugments.cardmods.DynvarCarrier;
 import CardAugments.commands.Chimera;
 import CardAugments.dynvars.DynamicDynamicVariableManager;
+import CardAugments.patches.CompatibilityPatches;
 import CardAugments.patches.RolledModFieldPatches;
 import CardAugments.ui.BiggerModButton;
 import CardAugments.ui.CenteredModLabel;
@@ -793,14 +794,21 @@ public class CardAugmentsMod implements
     }
 
     public static void rollCardAugment(AbstractCard c, int index) {
-        if (enableMods && !RolledModFieldPatches.RolledModField.rolled.get(c) && (commonWeight + uncommonWeight + rareWeight + rarityBias != 0)) {
+        boolean rolled = RolledModFieldPatches.RolledModField.rolled.get(c);
+        String mirror = CompatibilityPatches.CardModifiersMirrorField.cardModifiersSerialized.get(c);
+        if (CardModifierManager.modifiers(c).isEmpty() && !mirror.isEmpty())
+        {
+            CompatibilityPatches.NetworkSerializeCardAugments.loadModifiers(c, mirror);
+        }
+        else if (enableMods && !rolled && (commonWeight + uncommonWeight + rareWeight + rarityBias != 0))
+        {
             for (int i = 0 ; i < rollAttempts ; i++) {
                 if (AbstractDungeon.miscRng.random(99) < modProbabilityPercent) {
                     applyWeightedCardMod(c, rollRarity(c.rarity), index);
                 }
             }
+            RolledModFieldPatches.RolledModField.rolled.set(c, true);
         }
-        RolledModFieldPatches.RolledModField.rolled.set(c, true);
     }
 
     public static AbstractAugment.AugmentRarity rollRarity(AbstractCard.CardRarity rarity) {

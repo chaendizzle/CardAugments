@@ -91,6 +91,10 @@ public abstract class AbstractAugment extends AbstractCardModifier {
         return "";
     }
 
+    public String toNetworkData() { return ""; }
+
+    public void fromNetworkData(String mirrorData) { }
+
     @Override
     public List<TooltipInfo> additionalTooltips(AbstractCard card) {
         if (CardAugmentsMod.enableTooltips) {

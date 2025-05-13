@@ -1,17 +1,17 @@
 package CardAugments.patches;
 
+import CardAugments.CardAugmentsMod;
+import CardAugments.cardmods.AbstractAugment;
 import CardAugments.cardmods.common.MassiveMod;
 import CardAugments.cardmods.common.TinyMod;
 import CardAugments.cardmods.uncommon.BlurryMod;
 import SpireLocations.patches.nodemodifierhooks.ModifyRewardsPatch;
+import basemod.abstracts.AbstractCardModifier;
 import basemod.helpers.CardModifierManager;
 import blurryblur.CardPatches;
 import com.badlogic.gdx.graphics.g2d.Batch;
 import com.badlogic.gdx.graphics.g2d.SpriteBatch;
-import com.evacipated.cardcrawl.modthespire.lib.SpireInstrumentPatch;
-import com.evacipated.cardcrawl.modthespire.lib.SpirePatch2;
-import com.evacipated.cardcrawl.modthespire.lib.SpirePostfixPatch;
-import com.evacipated.cardcrawl.modthespire.lib.SpirePrefixPatch;
+import com.evacipated.cardcrawl.modthespire.lib.*;
 import com.megacrit.cardcrawl.cards.AbstractCard;
 import com.megacrit.cardcrawl.cards.green.Blur;
 import com.megacrit.cardcrawl.rewards.RewardItem;
@@ -20,6 +20,17 @@ import javassist.CannotCompileException;
 import javassist.expr.ExprEditor;
 import javassist.expr.MethodCall;
 import rainbowMod.patches.RainbowCardsInChestsPatch;
+import spireTogether.network.objects.NetworkClassObject;
+import spireTogether.util.DevConfig;
+import spireTogether.util.Reflection;
+import spireTogether.util.SerializablePair;
+import spireTogether.util.SpireLogger;
+
+import java.lang.reflect.Constructor;
+import java.lang.reflect.Field;
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Method;
+import java.util.*;
 
 import static CardAugments.CardAugmentsMod.rollCardAugment;
 
@@ -164,6 +175,168 @@ public class CompatibilityPatches {
             if (__result.cards != null) {
                 for (AbstractCard c : __result.cards) {
                     rollCardAugment(c);
+                }
+            }
+        }
+    }
+
+    @SpirePatch(clz = AbstractCard.class, method = "<class>")
+    public static class CardModifiersMirrorField {
+        public static SpireField<String> cardModifiersSerialized = new SpireField<>(() -> "");
+    }
+
+    @SpirePatch2(clz = NetworkClassObject.class, method = "CopyValues", requiredModId = "spireTogether", optional = true)
+    public static class NetworkSerializeCardAugments {
+
+        @SpirePrefixPatch
+        public static <T extends NetworkClassObject> void CopyValuesPatch(Object original) {
+            if (original instanceof AbstractCard)
+            {
+                // serialize modifiers to string string
+                AbstractCard card = (AbstractCard)original;
+                ArrayList<AbstractCardModifier> modifiers = CardModifierManager.modifiers(card);
+                StringJoiner sj = new StringJoiner(",");
+                for (AbstractCardModifier modifier : modifiers)
+                {
+                    if (modifier instanceof AbstractAugment)
+                    {
+                        AbstractAugment augment = (AbstractAugment) modifier;
+                        sj.add(augment.getClass().getCanonicalName() + ":" + augment.toNetworkData());
+                    }
+                }
+                CardAugmentsMod.logger.info("Modifiers serialized to: {}", sj.toString());
+                CompatibilityPatches.CardModifiersMirrorField.cardModifiersSerialized.set(card, sj.toString());
+            }
+        }
+
+        public static void loadModifiers(AbstractCard card, String modifiersStr)
+        {
+            if (modifiersStr.isEmpty())
+            {
+                return;
+            }
+            String[] modifiers = modifiersStr.split(",");
+            for (String modifier : modifiers)
+            {
+                String[] words = modifier.split(":", 2);
+                if (words.length != 2)
+                {
+                    CardAugmentsMod.logger.error("loadModifiers failed: invalid format: {}", modifier);
+                    continue;
+                }
+                String modifierName = words[0];
+                String modifierData = words[1];
+                try {
+                    Class<?> clazz = Class.forName(modifierName);
+                    if (AbstractAugment.class.isAssignableFrom(clazz)) {
+                        @SuppressWarnings("unchecked")
+                        Class<? extends AbstractAugment> modifierClass = (Class<? extends AbstractAugment>) clazz;
+                        Constructor<? extends AbstractAugment> constructor = modifierClass.getDeclaredConstructor();
+                        constructor.setAccessible(true);
+                        AbstractAugment augment = constructor.newInstance();
+                        augment.fromNetworkData(modifierData);
+                        CardModifierManager.addModifier(card, augment);
+                        CardAugmentsMod.logger.info("Successfully deserialized: {}:{}", modifierName, modifierData);
+                    }
+                    else
+                    {
+                        CardAugmentsMod.logger.error("loadModifiers failed: not a subclass of AbstractAugment: {}", modifierName);
+                    }
+                } catch (ClassNotFoundException e) {
+                    CardAugmentsMod.logger.error("loadModifiers failed: Class not found: {}", modifierName);
+                } catch (NoSuchMethodException e) {
+                    CardAugmentsMod.logger.error("loadModifiers failed: No no-arg constructor found: {}", modifierName);
+                } catch (Exception e) {
+                    throw new RuntimeException("Failed to instantiate: " + modifierName, e);
+                }
+            }
+        }
+    }
+
+    public static class NetworkDeserializeCardAugmentsUtils
+    {
+        private static HashMap<String, Field> fieldCache = new HashMap<String, Field>();
+
+        private static String demangle(String name)
+        {
+            return name.replaceAll("_\\d+$", "");
+        }
+
+        private static Field findField(Class<?> oClass, String fieldName, ArrayList<Map<String, Field>> fields)
+        {
+            String key = oClass.getCanonicalName() + ":" + fieldName;
+            if (fieldCache.containsKey(key))
+            {
+                return fieldCache.get(key);
+            }
+            // exact match
+            for(Map<String, Field> objectFields : fields) {
+                if (objectFields != null) {
+                    Field f = objectFields.get(fieldName);
+                    if (f != null) {
+                        fieldCache.put(key, f);
+                        return f;
+                    }
+                }
+            }
+            // mangled match
+            String demangled = demangle(fieldName);
+            for(Map<String, Field> objectFields : fields) {
+                if (objectFields != null) {
+                    for (String s : objectFields.keySet())
+                    {
+                        if (demangle(s).equals(demangled))
+                        {
+                            Field f = objectFields.get(s);
+                            if (f != null) {
+                                fieldCache.put(key, f);
+                                return f;
+                            }
+                        }
+                    }
+                }
+            }
+            return null;
+        }
+
+        public static Field getFieldByName(Class<?> oClass, String fieldName) throws NoSuchFieldException {
+            ArrayList<Map<String, Field>> fields = null;
+            try
+            {
+                Method method = Reflection.class.getDeclaredMethod("getAllFields", Class.class);
+                method.setAccessible(true);
+                Object o = method.invoke(null, oClass);
+                fields = (ArrayList<Map<String, Field>>)o;
+            }
+            catch (NoSuchMethodException | InvocationTargetException | IllegalAccessException e)
+            {
+                SpireLogger.Log("Method getAllFields failed: {}", e.toString());
+                throw new NoSuchFieldException();
+            }
+            Field f = NetworkDeserializeCardAugmentsUtils.findField(oClass, fieldName, fields);
+            if (f != null)
+            {
+                return f;
+            }
+            throw new NoSuchFieldException();
+        }
+    }
+
+    @SpirePatch2(clz = Reflection.class, method = "setFieldValue", requiredModId = "spireTogether", optional = true)
+    public static class NetworkDeserializeCardAugments
+    {
+        @SpirePostfixPatch
+        public static void SetFieldValuePatch(String varName, Object source, Object value) {
+            if (value != null) {
+                try {
+                    Field field = NetworkDeserializeCardAugmentsUtils.getFieldByName(source.getClass(), varName);
+                    field.setAccessible(true);
+                    field.set(source, value);
+                } catch (Exception e) {
+                    if (DevConfig.logMode) {
+                        SpireLogger.LogError("Error setting field " + varName + " with value " + (value == null ? "null" : value) + "due to " + e, SpireLogger.ErrorType.FATAL);
+                        e.printStackTrace();
+                    }
                 }
             }
         }
