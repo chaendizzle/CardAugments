@@ -13,6 +13,7 @@ import com.badlogic.gdx.graphics.g2d.Batch;
 import com.badlogic.gdx.graphics.g2d.SpriteBatch;
 import com.evacipated.cardcrawl.modthespire.lib.*;
 import com.megacrit.cardcrawl.cards.AbstractCard;
+import com.megacrit.cardcrawl.cards.CardGroup;
 import com.megacrit.cardcrawl.cards.green.Blur;
 import com.megacrit.cardcrawl.rewards.RewardItem;
 import com.megacrit.cardcrawl.screens.CombatRewardScreen;
@@ -20,6 +21,9 @@ import javassist.CannotCompileException;
 import javassist.expr.ExprEditor;
 import javassist.expr.MethodCall;
 import rainbowMod.patches.RainbowCardsInChestsPatch;
+import spireTogether.cards.CustomMultiplayerCard;
+import spireTogether.network.P2P.P2PCallbacks;
+import spireTogether.network.P2P.P2PPlayer;
 import spireTogether.network.objects.NetworkClassObject;
 import spireTogether.util.DevConfig;
 import spireTogether.util.Reflection;
@@ -208,49 +212,6 @@ public class CompatibilityPatches {
                 CompatibilityPatches.CardModifiersMirrorField.cardModifiersSerialized.set(card, sj.toString());
             }
         }
-
-        public static void loadModifiers(AbstractCard card, String modifiersStr)
-        {
-            if (modifiersStr.isEmpty())
-            {
-                return;
-            }
-            String[] modifiers = modifiersStr.split(",");
-            for (String modifier : modifiers)
-            {
-                String[] words = modifier.split(":", 2);
-                if (words.length != 2)
-                {
-                    CardAugmentsMod.logger.error("loadModifiers failed: invalid format: {}", modifier);
-                    continue;
-                }
-                String modifierName = words[0];
-                String modifierData = words[1];
-                try {
-                    Class<?> clazz = Class.forName(modifierName);
-                    if (AbstractAugment.class.isAssignableFrom(clazz)) {
-                        @SuppressWarnings("unchecked")
-                        Class<? extends AbstractAugment> modifierClass = (Class<? extends AbstractAugment>) clazz;
-                        Constructor<? extends AbstractAugment> constructor = modifierClass.getDeclaredConstructor();
-                        constructor.setAccessible(true);
-                        AbstractAugment augment = constructor.newInstance();
-                        augment.fromNetworkData(modifierData);
-                        CardModifierManager.addModifier(card, augment);
-                        CardAugmentsMod.logger.info("Successfully deserialized: {}:{}", modifierName, modifierData);
-                    }
-                    else
-                    {
-                        CardAugmentsMod.logger.error("loadModifiers failed: not a subclass of AbstractAugment: {}", modifierName);
-                    }
-                } catch (ClassNotFoundException e) {
-                    CardAugmentsMod.logger.error("loadModifiers failed: Class not found: {}", modifierName);
-                } catch (NoSuchMethodException e) {
-                    CardAugmentsMod.logger.error("loadModifiers failed: No no-arg constructor found: {}", modifierName);
-                } catch (Exception e) {
-                    throw new RuntimeException("Failed to instantiate: " + modifierName, e);
-                }
-            }
-        }
     }
 
     public static class NetworkDeserializeCardAugmentsUtils
@@ -320,6 +281,49 @@ public class CompatibilityPatches {
             }
             throw new NoSuchFieldException();
         }
+
+        public static void loadModifiers(AbstractCard card, String modifiersStr)
+        {
+            if (modifiersStr.isEmpty())
+            {
+                return;
+            }
+            String[] modifiers = modifiersStr.split(",");
+            for (String modifier : modifiers)
+            {
+                String[] words = modifier.split(":", 2);
+                if (words.length != 2)
+                {
+                    CardAugmentsMod.logger.error("loadModifiers failed: invalid format: {}", modifier);
+                    continue;
+                }
+                String modifierName = words[0];
+                String modifierData = words[1];
+                try {
+                    Class<?> clazz = Class.forName(modifierName);
+                    if (AbstractAugment.class.isAssignableFrom(clazz)) {
+                        @SuppressWarnings("unchecked")
+                        Class<? extends AbstractAugment> modifierClass = (Class<? extends AbstractAugment>) clazz;
+                        Constructor<? extends AbstractAugment> constructor = modifierClass.getDeclaredConstructor();
+                        constructor.setAccessible(true);
+                        AbstractAugment augment = constructor.newInstance();
+                        augment.fromNetworkData(modifierData);
+                        CardModifierManager.addModifier(card, augment);
+                        CardAugmentsMod.logger.info("Successfully deserialized: {}:{}", modifierName, modifierData);
+                    }
+                    else
+                    {
+                        CardAugmentsMod.logger.error("loadModifiers failed: not a subclass of AbstractAugment: {}", modifierName);
+                    }
+                } catch (ClassNotFoundException e) {
+                    CardAugmentsMod.logger.error("loadModifiers failed: Class not found: {}", modifierName);
+                } catch (NoSuchMethodException e) {
+                    CardAugmentsMod.logger.error("loadModifiers failed: No no-arg constructor found: {}", modifierName);
+                } catch (Exception e) {
+                    throw new RuntimeException("Failed to instantiate: " + modifierName, e);
+                }
+            }
+        }
     }
 
     @SpirePatch2(clz = Reflection.class, method = "setFieldValue", requiredModId = "spireTogether", optional = true)
@@ -338,6 +342,19 @@ public class CompatibilityPatches {
                         e.printStackTrace();
                     }
                 }
+            }
+        }
+    }
+
+    @SpirePatch2(clz = P2PCallbacks.class, method = "OnFFCardAdd", requiredModId = "spireTogether", optional = true)
+    public static class NetworkTransferCardAugments
+    {
+        @SpirePrefixPatch
+        public static void CardAddPatch(AbstractCard card) {
+            String mirror = CompatibilityPatches.CardModifiersMirrorField.cardModifiersSerialized.get(card);
+            if (CardModifierManager.modifiers(card).isEmpty() && !mirror.isEmpty())
+            {
+                NetworkDeserializeCardAugmentsUtils.loadModifiers(card, mirror);
             }
         }
     }

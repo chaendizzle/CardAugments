@@ -798,7 +798,7 @@ public class CardAugmentsMod implements
         String mirror = CompatibilityPatches.CardModifiersMirrorField.cardModifiersSerialized.get(c);
         if (CardModifierManager.modifiers(c).isEmpty() && !mirror.isEmpty())
         {
-            CompatibilityPatches.NetworkSerializeCardAugments.loadModifiers(c, mirror);
+            CompatibilityPatches.NetworkDeserializeCardAugmentsUtils.loadModifiers(c, mirror);
         }
         else if (enableMods && !rolled && (commonWeight + uncommonWeight + rareWeight + rarityBias != 0))
         {
